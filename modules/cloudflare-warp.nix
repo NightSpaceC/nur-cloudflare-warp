@@ -38,5 +38,5 @@ in
     services.dbus.packages = [ cfg.package ];
   };
 
-  meta.maintainers = [ (import ../../maintainers.nix).nightspacec ];
+  meta.maintainers = [ (import ../maintainers.nix).nightspacec ];
 }
