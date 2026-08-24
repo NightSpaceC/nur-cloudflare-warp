@@ -153,7 +153,7 @@ stdenv.mkDerivation {
   '';
 
   postFixup = ''
-    substituteInPlace "$out/lib/systemd/system/warp-svc.service" --replace-fail ExecStart=/bin/warp-svc "ExecStart=$out/bin/warp-svc"$'\nBindReadOnlyPaths=${nftables}/bin/nft:/usr/sbin/nft'
+    substituteInPlace "$out/lib/systemd/system/warp-svc.service" --replace-fail ExecStart=/bin/warp-svc "ExecStart=$out/bin/warp-svc"$'\n'"BindReadOnlyPaths=${nftables}/bin/nft:/usr/sbin/nft"
     substituteInPlace "$out/share/systemd/user/warp-taskbar.service" --replace-fail ExecStart=/bin/warp-taskbar "ExecStart=$out/bin/warp-taskbar"
     substituteInPlace "$out/share/dbus-1/services/com.cloudflare.WarpTaskbar.service" --replace-fail Exec=/bin/warp-taskbar "Exec=$out/bin/warp-taskbar"
     substituteInPlace "$out/share/applications/com.cloudflare.warp.desktop" --replace-fail Exec=/bin/warp-cli "Exec=$out/bin/warp-cli"
