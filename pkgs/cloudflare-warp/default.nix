@@ -105,36 +105,184 @@ stdenv.mkDerivation {
     recover_extglob=$(shopt -p extglob || true)
     shopt -s extglob
 
-    fix_path() {
-      local normalized_path=''${1##.?(/)}
-      echo "''${normalized_path##usr?(\/)}"
+    normalize_path() {
+      local remain=$1
+
+      local normalized
+      if [[ $remain == /* ]]; then
+        normalized=/
+        remain=''${remain#/}
+      else
+        normalized=
+      fi
+
+      while [[ -n $remain ]]; do
+        [[ $remain == /* ]] && return 1
+
+        if [[ $remain == ./* || $remain == . ]]; then
+          remain=''${remain##.?(/)}
+        elif [[ $remain == ../* || $remain == .. ]]; then
+          [[ $normalized == / ]] && return 1
+
+          if [[ $normalized == */../ || $normalized == ../ || -z $normalized ]]; then
+            normalized=$normalized../
+          elif [[ $normalized == */*/ ]]; then
+            normalized=''${normalized%/*/}/
+          else
+            normalized=
+          fi
+
+          remain=''${remain##..?(/)}
+        elif [[ $remain == */* ]]; then
+          normalized=$normalized''${remain%%/*}/
+          remain=''${remain#*/}
+        else
+          normalized=$normalized$remain/
+          remain=
+        fi
+      done
+
+      [[ -z $normalized ]] && normalized=./
+      [[ $normalized != / ]] && normalized=''${normalized%/}
+      echo "$normalized"
     }
-    fix_path_str=$(declare -f fix_path)
+    normalize_path_str=$(declare -f normalize_path)
+
+    join_path() {
+      local prefix suffix ret
+
+      prefix=$(normalize_path "$1")
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      suffix=$(normalize_path "$2")
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      [[ $suffix == /* ]] && return 1
+
+      local path
+      if [[ $prefix == / ]]; then
+        path=$(normalize_path "/$suffix")
+      else
+        path=$(normalize_path "$prefix/$suffix")
+      fi
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      echo "$path"
+    }
+    join_path_str=$(declare -f join_path)
+
+    relative_path() {
+      local target base ret
+
+      target=$(normalize_path "$1")
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      base=$(normalize_path "$2")
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      [[ $base == /* && $target == /* || $base != /* && $target != /* ]] || return 1
+
+      while [[ -n $base && -n $target ]]; do
+        local base_next=''${base%%/*}
+        local target_next=''${target%%/*}
+        if [[ $base_next != $target_next ]]; then
+          break
+        fi
+
+        if [[ $base != */* ]]; then
+          base=
+        else
+          base=''${base#*/}
+        fi
+        if [[ $target != */* ]]; then
+          target=
+        else
+          target=''${target#*/}
+        fi
+      done
+
+      local relative=
+      while [[ -n $base ]]; do
+        local base_next=''${base%%/*}
+        [[ $base_next == .. ]] && return 1
+
+        relative=$relative../
+
+        if [[ $base != */* ]]; then
+          base=
+        else
+          base=''${base#*/}
+        fi
+      done
+
+      echo "$(join_path "$relative" "$target")"
+    }
+    relative_path_str=$(declare -f relative_path)
+
+    follow_link() {
+      local original link target ret
+
+      original=$(normalize_path "$1")
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      link=$(normalize_path "$2")
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      target=$(normalize_path "$3")
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      local relative
+      relative=$(relative_path "$original" "$link")
+      ret=$?
+      [[ $ret != 0 ]] && return "$ret"
+
+      if [[ $relative == ../* || $relative == .. ]]; then
+        echo "$original"
+        return 0
+      fi
+
+      echo "$(join_path "$target" "$relative")"
+    }
+    follow_link_str=$(declare -f follow_link)
+
 
     find . -type d -exec bash -c $'
       shopt -s extglob
 
-      '"$fix_path_str"$'
+      '"$normalize_path_str"$'
+      '"$join_path_str"$'
+      '"$relative_path_str"$'
+      '"$follow_link_str"$'
 
-      fixed_path=$(fix_path "{}")
-      [[ -z $fixed_path ]] && exit
+      final_path=$(follow_link "{}" usr .)
 
-      install -d "'"$out"$'/$fixed_path"
+      mkdir -m 755 -p "$(join_path "'"$out"$'" "$final_path")"
     ' _ \;
 
     find . -type f -exec bash -c $'
       shopt -s extglob
 
-      '"$fix_path_str"$'
+      '"$normalize_path_str"$'
+      '"$join_path_str"$'
+      '"$relative_path_str"$'
+      '"$follow_link_str"$'
 
-      fixed_path=$(fix_path "{}")
+      final_path=$(follow_link "{}" usr .)
 
-      mv "{}" "'"$out"$'/$fixed_path"
+      mv "{}" "'"$out"$'/$final_path"
 
-      read -r -n 4 header < "'"$out"$'/$fixed_path"
-      [[ $header = $\'\\x7fELF\' ]] && mode=775 || mode=664
+      read -r -n 4 header < "'"$out"$'/$final_path"
+      [[ $header = $\'\\x7fELF\' ]] && mode=755 || mode=644
 
-      chmod "$mode" "'"$out"$'/$fixed_path"
+      chmod "$mode" "'"$out"$'/$final_path"
     ' _ \;
 
     ln -s ../lib/warp/warp-taskbar "$out/bin/warp-taskbar"
